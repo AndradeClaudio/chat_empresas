@@ -34,7 +34,6 @@ Este projeto é uma ferramenta para baixar arquivos .zip contendo dados de CNPJ 
 ## Estrutura de Diretórios
 
 - [data](http://_vscodecontentref_/2): Diretório onde os arquivos baixados serão salvos.
-- [qdrant_storage](http://_vscodecontentref_/3): Diretório de armazenamento do Qdrant.
 - [src](http://_vscodecontentref_/4): Diretório contendo os scripts principais do projeto.
 
 ## Exemplo de Uso
