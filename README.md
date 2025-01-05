@@ -1,34 +1,139 @@
-# Projeto de Download de Arquivos CNPJ
+# Chat Empresas
 
-Este projeto é uma ferramenta para baixar arquivos .zip contendo dados de CNPJ a partir de uma URL específica e salvá-los em um diretório local. Ele utiliza as bibliotecas `requests` para fazer requisições HTTP e `BeautifulSoup` para analisar o conteúdo HTML da página.
+Este projeto Python é responsável por baixar, descompactar, converter e unificar arquivos de dados de empresas fornecidos pela Receita Federal do Brasil.
 
 ## Estrutura do Projeto
 
-- `src/download_empresa/download_dados_empresa.py`: Script principal que contém a função `baixar_arquivos_cnpj` para baixar os arquivos .zip.
-- `src/download_empresa/unzip_files.py`: Script para descompactar os arquivos .zip baixados.
-- `src/main.py`: Script de chat do streamlit
+- `src/download_empresa/unzip_files.py`: Script para descompactar arquivos .zip.
+- `src/download_empresa/download_dados_empresa.py`: Script para baixar arquivos .zip de uma URL.
+- `src/download_empresa/convert_files.py`: Script para converter arquivos de texto para o formato Parquet e unificar os arquivos convertidos.
 
+## Requisitos
 
-## Como Usar
+- Python 3.6+
+- Bibliotecas Python:
+  - `requests`
+  - `beautifulsoup4`
+  - `pandas`
+  - `pyarrow`
+  - `multiprocessing`
 
-1. Certifique-se de ter as bibliotecas necessárias instaladas:
-    ```sh
-    pip install -r requirements.txt
-    ```
+Você pode instalar as dependências utilizando o seguinte comando:
 
-2. Execute o script principal para baixar os arquivos:
-    ```sh
-    python src/download_empresa/download_dados_empresa.py
-    ```
+```bash
+pip install requests beautifulsoup4 pandas pyarrow
+```
 
-3. Execute o script para descompactar os arquivos baixados:
-    ```sh
-    python src/download_empresa/unzip_files.py
-    ```
+## Uso
 
-## Estrutura de Diretórios
+### Baixar Arquivos
 
-- `data`: Diretório onde os arquivos baixados serão salvos.
-- `src`: Diretório contendo os scripts principais do projeto.
+Para baixar os arquivos .zip de uma URL, execute o script `download_dados_empresa.py`:
 
+```bash
+python src/download_empresa/download_dados_empresa.py
+```
 
+### Descompactar Arquivos
+
+Para descompactar os arquivos .zip baixados, execute o script `unzip_files.py`:
+
+```bash
+python src/download_empresa/unzip_files.py
+```
+
+### Converter Arquivos
+
+Para converter os arquivos de texto descompactados para o formato Parquet e unificar os arquivos convertidos, execute o script `convert_files.py`:
+
+```bash
+python src/download_empresa/convert_files.py
+```
+
+## Estrutura dos Dados
+
+### Empresas
+
+- `CNPJ_BASICO`
+- `RAZAO_SOCIAL`
+- `NATUREZA_JURIDICA`
+- `QUALIFICACAO_RESPONSAVEL`
+- `CAPITAL_SOCIAL`
+- `PORTE_EMPRESA`
+- `ENTE_FEDERATIVO_RESPONSAVEL`
+
+### Estabelecimentos
+
+- `CNPJ_BASICO`
+- `CNPJ_ORDEM`
+- `CNPJ_DV`
+- `IDENTIFICADOR_MATRIZ_FILIAL`
+- `NOME_FANTASIA`
+- `SITUACAO_CADASTRAL`
+- `DATA_SITUACAO_CADASTRAL`
+- `MOTIVO_SITUACAO_CADASTRAL`
+- `NOME_CIDADE_EXTERIOR`
+- `PAIS`
+- `DATA_INICIO_ATIVIDADE`
+- `CNAE_FISCAL_PRINCIPAL`
+- `CNAE_FISCAL_SECUNDARIA`
+- `TIPO_LOGRADOURO`
+- `LOGRADOURO`
+- `NUMERO`
+- `COMPLEMENTO`
+- `BAIRRO`
+- `CEP`
+- `UF`
+- `MUNICIPIO`
+- `DDD_1`
+- `TELEFONE_1`
+- `DDD_2`
+- `TELEFONE_2`
+- `DDD_FAX`
+- `FAX`
+- `CORREIO_ELETRONICO`
+- `SITUACAO_ESPECIAL`
+- `DATA_SITUACAO_ESPECIAL`
+
+### Sócios
+
+- `CNPJ_BASICO`
+- `IDENTIFICADOR_SOCIO`
+- `NOME_SOCIO`
+- `CNPJ_CPF_SOCIO`
+- `QUALIFICACAO_SOCIO`
+- `DATA_ENTRADA_SOCIEDADE`
+- `PAIS`
+- `REPRESENTANTE_LEGAL`
+- `NOME_REPRESENTANTE`
+- `QUALIFICACAO_REPRESENTANTE`
+- `FAIXA_ETARIA`
+
+### Países
+
+- `CODIGO_PAIS`
+- `NOME_PAIS`
+
+### Municípios
+
+- `CODIGO_MUNICIPIO`
+- `NOME_MUNICIPIO`
+
+### Qualificações
+
+- `CODIGO_QUALIFICACAO`
+- `DESCRICAO_QUALIFICACAO`
+
+### Naturezas Jurídicas
+
+- `CODIGO_NATUREZA`
+- `DESCRICAO_NATUREZA`
+
+### CNAEs
+
+- `CODIGO_CNAE`
+- `DESCRICAO_CNAE`
+
+## Licença
+
+Este projeto está licenciado sob a Licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
