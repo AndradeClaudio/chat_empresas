@@ -1,6 +1,7 @@
-import pandas as pd
 import os
+import polars as pl
 from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
 def parse_txt_to_parquet(input_txt_path, output_parquet_path):
     # Define o cabeçalho conforme o layout fornecido
@@ -14,14 +15,22 @@ def parse_txt_to_parquet(input_txt_path, output_parquet_path):
         "ENTE_FEDERATIVO_RESPONSAVEL"
     ]
 
-    # Lê o arquivo TXT como um CSV delimitado por ponto e vírgula
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
+    # Lê o arquivo CSV usando Polars
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        # e, caso sua versão do Polars suporte, podemos usar `on_error="raise"`:
+        #on_error="raise"
+    )
 
     # Converte o DataFrame para Parquet
-    df.to_parquet(output_parquet_path, index=False)
+    df.write_parquet(output_parquet_path)
 
 def parse_estabele_to_parquet(input_txt_path, output_parquet_path):
-    # Define o cabeçalho conforme o layout fornecido para estabelecimentos
     column_names = [
         "CNPJ_BASICO",
         "CNPJ_ORDEM",
@@ -55,11 +64,18 @@ def parse_estabele_to_parquet(input_txt_path, output_parquet_path):
         "DATA_SITUACAO_ESPECIAL"
     ]
 
-    # Lê o arquivo TXT como um CSV delimitado por ponto e vírgula
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-
-    # Converte o DataFrame para Parquet
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        quote_char='"',
+        # Removemos ignore_errors=True
+        #on_error="raise",
+        infer_schema_length=10000
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_socios_to_parquet(input_txt_path, output_parquet_path):
     column_names = [
@@ -75,33 +91,82 @@ def parse_socios_to_parquet(input_txt_path, output_parquet_path):
         "QUALIFICACAO_REPRESENTANTE",
         "FAIXA_ETARIA"
     ]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_paises_to_parquet(input_txt_path, output_parquet_path):
     column_names = ["CODIGO_PAIS", "NOME_PAIS"]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_municipios_to_parquet(input_txt_path, output_parquet_path):
     column_names = ["CODIGO_MUNICIPIO", "NOME_MUNICIPIO"]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_qualificacoes_to_parquet(input_txt_path, output_parquet_path):
     column_names = ["CODIGO_QUALIFICACAO", "DESCRICAO_QUALIFICACAO"]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_naturezas_to_parquet(input_txt_path, output_parquet_path):
     column_names = ["CODIGO_NATUREZA", "DESCRICAO_NATUREZA"]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def parse_cnaes_to_parquet(input_txt_path, output_parquet_path):
     column_names = ["CODIGO_CNAE", "DESCRICAO_CNAE"]
-    df = pd.read_csv(input_txt_path, sep=';', encoding='latin-1', header=None, names=column_names, on_bad_lines='skip', engine='python')
-    df.to_parquet(output_parquet_path, index=False)
+    df = pl.read_csv(
+        input_txt_path,
+        separator=';',
+        has_header=False,
+        new_columns=column_names,
+        encoding='latin-1',
+        # Removemos ignore_errors=True
+        #on_error="raise"
+    )
+    df.write_parquet(output_parquet_path)
 
 def process_file(file_paths):
     input_file_path, output_file_path = file_paths
@@ -135,15 +200,11 @@ def convert_all_files(input_directory, output_directory, file_extension, process
             output_file_path = os.path.join(output_directory, output_file_name)
             file_paths.append((input_file_path, output_file_path))
 
-    # Utiliza multiprocessing para processar até 4 arquivos ao mesmo tempo
-    with Pool(processes=min(4, cpu_count())) as pool:
-        pool.map(process_function, file_paths)
-
-def unify_parquet_files(output_directory, unified_file_path):
-    parquet_files = [os.path.join(output_directory, f) for f in os.listdir(output_directory) if f.endswith('.parquet')]
-    df_list = [pd.read_parquet(file) for file in parquet_files]
-    unified_df = pd.concat(df_list, ignore_index=True)
-    unified_df.to_parquet(unified_file_path, index=False)
+    # Utiliza multiprocessing para processar até 2 arquivos ao mesmo tempo
+    with Pool(processes=min(1, cpu_count())) as pool:
+        # Usando 'imap' em vez de 'map' para permitir a iteração e exibir a barra de progresso
+        for _ in tqdm(pool.imap(process_function, file_paths), total=len(file_paths), desc="Convertendo arquivos"):
+            pass
 
 if __name__ == "__main__":
     # Caminhos de exemplo para os diretórios de entrada e saída
@@ -160,47 +221,31 @@ if __name__ == "__main__":
     # Executa a conversão para todos os arquivos de empresas no diretório de entrada
     convert_all_files(input_directory, output_directory_empresas, ".EMPRECSV", process_file)
     print("Conversão de arquivos de empresas concluída.")
-    unify_parquet_files(output_directory_empresas, "./data/unified_empresas.parquet")
-    print("Unificação de arquivos de empresas concluída.")
 
     # Executa a conversão para todos os arquivos de estabelecimentos no diretório de entrada
     convert_all_files(input_directory, output_directory_estabelecimentos, ".ESTABELE", process_file)
     print("Conversão de arquivos de estabelecimentos concluída.")
-    unify_parquet_files(output_directory_estabelecimentos, "./data/unified_estabelecimentos.parquet")
-    print("Unificação de arquivos de estabelecimentos concluída.")
 
     # Executa a conversão para todos os arquivos de sócios no diretório de entrada
     convert_all_files(input_directory, output_directory_socios, ".SOCIOCS", process_file)
     print("Conversão de arquivos de sócios concluída.")
-    unify_parquet_files(output_directory_socios, "./data/unified_socios.parquet")
-    print("Unificação de arquivos de sócios concluída.")
 
     # Executa a conversão para todos os arquivos de países no diretório de entrada
     convert_all_files(input_directory, output_directory_paises, ".PAISCSV", process_file)
     print("Conversão de arquivos de países concluída.")
-    unify_parquet_files(output_directory_paises, "./data/unified_paises.parquet")
-    print("Unificação de arquivos de países concluída.")
 
     # Executa a conversão para todos os arquivos de municípios no diretório de entrada
     convert_all_files(input_directory, output_directory_municipios, ".MUNICSV", process_file)
     print("Conversão de arquivos de municípios concluída.")
-    unify_parquet_files(output_directory_municipios, "./data/unified_municipios.parquet")
-    print("Unificação de arquivos de municípios concluída.")
 
     # Executa a conversão para todos os arquivos de qualificações de sócios no diretório de entrada
     convert_all_files(input_directory, output_directory_qualificacoes, ".QUALSCSV", process_file)
     print("Conversão de arquivos de qualificações de sócios concluída.")
-    unify_parquet_files(output_directory_qualificacoes, "./data/unified_qualificacoes.parquet")
-    print("Unificação de arquivos de qualificações de sócios concluída.")
 
     # Executa a conversão para todos os arquivos de naturezas jurídicas no diretório de entrada
     convert_all_files(input_directory, output_directory_naturezas, ".NATJUCSV", process_file)
     print("Conversão de arquivos de naturezas jurídicas concluída.")
-    unify_parquet_files(output_directory_naturezas, "./data/unified_naturezas.parquet")
-    print("Unificação de arquivos de naturezas jurídicas concluída.")
 
     # Executa a conversão para todos os arquivos de CNAEs no diretório de entrada
     convert_all_files(input_directory, output_directory_cnaes, ".CNAECSV", process_file)
     print("Conversão de arquivos de CNAEs concluída.")
-    unify_parquet_files(output_directory_cnaes, "./data/unified_cnaes.parquet")
-    print("Unificação de arquivos de CNAEs concluída.")
