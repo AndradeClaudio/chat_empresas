@@ -7,10 +7,10 @@ import pandas as pd
 import os
 from typing_extensions import TypedDict
 from typing import List, Annotated
-from IPython.display import Image, display, HTML
 import matplotlib.pyplot as plt
 import io
 import base64
+import pymupdf
 
 # Importações dos módulos do LangGraph
 from langchain_openai.chat_models import ChatOpenAI
@@ -20,9 +20,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from operator import add
+import gc
 
-# Configurar a chave de API da OpenAI (substitua 'sua-chave-api-openai' pela sua chave real)
-os.environ['OPENAI_API_KEY'] = 'coloque sua api key aqui'
 
 # Definir o modelo de linguagem
 model = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
@@ -41,31 +40,70 @@ class AgentState(TypedDict):
     interpretation: str
     plot_needed: bool
     plot_html: str
+# Função para extrair metadados do PDF
+def extract_metadata_from_pdf(pdf_path):
+    metadata = {}
+    pdf_document = pymupdf.open(pdf_path)
+    for page in pdf_document:
+        text = page.get_text()
+        lines = text.split('\n')
+        current_table = None
+        for line in lines:
+            if "Campo" in line and "Descrição" in line:
+                current_table = line.strip()
+                metadata[current_table] = []
+            elif current_table and line.strip():
+                metadata[current_table].append(line.strip())
+    return metadata
 
-# Função para obter o esquema do banco de dados
-def get_database_schema(db_path):
-    conn = duckdb.connect(db_path)
+
+def get_database_schema(db_path, pdf_path):
+    metadata = extract_metadata_from_pdf(pdf_path)
+    DB_FILE = 'dados_empresas.duckdb'  # Opcional, se preferir persistência em disco
+    conn = duckdb.connect(DB_FILE)  # ou apenas duckdb.connect() para uma conexão em memória
+    # Cria uma tabela resultante a partir do join direto dos arquivos Parquet usando parquet_scan()
+    conn.execute("""
+    CREATE OR REPLACE VIEW resultados_consulta AS
+    SELECT 
+        e.CNPJ_BASICO, 
+        e.RAZAO_SOCIAL, 
+        e.NATUREZA_JURIDICA, 
+        e.CAPITAL_SOCIAL, 
+        e.PORTE_EMPRESA, 
+        est.NOME_FANTASIA, 
+        est.CNAE_FISCAL_PRINCIPAL, 
+        s.NOME_SOCIO, 
+        s.CNPJ_CPF_SOCIO, 
+        s.QUALIFICACAO_SOCIO
+    FROM 
+        parquet_scan('data/parquet_empresas/*.parquet') AS e
+    LEFT JOIN 
+        parquet_scan('data/parquet_estabelecimentos/*.parquet') AS est 
+        ON e.CNPJ_BASICO = est.CNPJ_BASICO
+    LEFT JOIN 
+        parquet_scan('data/parquet_socios/*.parquet') AS s 
+        ON e.CNPJ_BASICO = s.CNPJ_BASICO
+    """)
+    # Coleta de lixo, se necessário
+    gc.collect()
     cursor = conn.cursor()
-    cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='main'")
-    tables = cursor.fetchall()
     schema = ''
-    for table_name in tables:
-        table_name = table_name[0]
-        cursor.execute(f"DESCRIBE {table_name}")
-        columns = cursor.fetchall()
-        schema += f"Tabela: {table_name}\n"
-        schema += "Colunas:\n"
-        for column in columns:
-            schema += f" - {column[0]} ({column[1]})\n"
-        schema += '\n'
+    cursor.execute(f"DESCRIBE resultados_consulta")
+    columns = cursor.fetchall()
+    schema += f"Tabela: resultados_consulta\n"
+    schema += "Colunas:\n"
+    for column in columns:
+        description = next((desc for desc in metadata.get('Campo Descrição', []) if column[0] in desc), '')
+        schema += f" - {column[0]} ({column[1]}) - {description}\n"
+    schema += '\n'
     conn.close()
     return schema
 
 # Definir os nós para o LangGraph
 def search_engineer_node(state: AgentState):
-    db_schema = get_database_schema('clientes_novo.duckdb')
+    db_schema = get_database_schema('dados_empresas.duckdb', '/home/andsil/projetos/chat_empresas/doc/cnpj-metadados (1).pdf')
     state['table_schemas'] = db_schema
-    state['database'] = 'clientes_novo.duckdb'
+    state['database'] = 'dados_empresas.duckdb'
     return state
 
 def sql_writer_node(state: AgentState):
@@ -77,11 +115,16 @@ Você é um especialista em DuckDB e sua sintaxe SQL. Sua tarefa é escrever **a
 - Não incluir comentários, explicações ou qualquer texto adicional.
 - Não utilizar formatação de código ou markdown.
 - Retornar apenas a consulta SQL válida.
+- Sempre trabalhar com like e % nos campos string do where
+- Em todos resultados deve trazer a RAZÃO SOCIAL. 
 """
     instruction = f"Esquema do banco de dados:\n{state['table_schemas']}\n"
     if len(state['reflect']) > 0:
         instruction += f"Considere os seguintes feedbacks:\n{chr(10).join(state['reflect'])}\n"
-    instruction += f"Escreva a consulta SQL que responda à seguinte pergunta: {state['question']}\n"
+    instruction += f"""Escreva a consulta SQL que responda a pergunta abaixo:\n
+                    Converta a pergunta para maiscula. \n
+                    Não mudar a grafia da pergunta. \n
+                    {state['question']}\n"""
     messages = [
         SystemMessage(content=role_prompt),
         HumanMessage(content=instruction)
@@ -263,9 +306,5 @@ def process_question(question):
         print('Nenhum resultado')
     print('\nInterpretação:')
     print(final_state['interpretation'])
-    if final_state.get('plot_html'):
-        display(HTML(final_state['plot_html']))
-    else:
-        print('Nenhum gráfico gerado.')
-pergunta = "Qual é a distribuição de produtos entre os clientes que pagam acima da média geral?"
+pergunta = "Quem é socios da empresa Strides?"
 process_question(pergunta)

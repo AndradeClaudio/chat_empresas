@@ -39,6 +39,6 @@ def unzip_files(source_directory, destination_directory):
     # se precisar, pode usar essa lista para logs ou tratamentos adicionais
 
 if __name__ == "__main__":
-    source_directory = "./data/arquivos_cnpj_2024_12"
-    destination_directory = "./data/unzipped_files"
+    source_directory = "./data/arquivos_cnpj_2025_01"
+    destination_directory = "./data/unzipped_files_2025_01"
     unzip_files(source_directory, destination_directory)

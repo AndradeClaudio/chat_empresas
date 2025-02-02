@@ -56,6 +56,6 @@ def baixar_arquivos_cnpj(url_base, pasta_destino):
                 print(f"Erro ao baixar {nome_arquivo}: {e}")
 
 if __name__ == "__main__":
-    url = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/2024-12/"
-    pasta_destino = ".//data//arquivos_cnpj_2024_12"
+    url = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/2025-01/"
+    pasta_destino = ".//data//arquivos_cnpj_2025_01"
     baixar_arquivos_cnpj(url, pasta_destino)
