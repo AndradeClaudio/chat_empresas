@@ -34,6 +34,7 @@ Em seguida, instale as dependências do projeto:
 
 ```bash
 uv sync
+source .venv/bin/activate
 ```
 
 ## Uso
