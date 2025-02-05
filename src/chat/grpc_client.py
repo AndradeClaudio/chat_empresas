@@ -1,7 +1,6 @@
 # grpc_client.py
 
 import logging
-import asyncio
 from grpc import aio
 import genai_pb2
 import genai_pb2_grpc

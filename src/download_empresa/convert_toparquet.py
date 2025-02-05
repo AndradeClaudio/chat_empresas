@@ -1,12 +1,5 @@
 import os
-import csv
 import fireducks.pandas as pd
-from multiprocessing import Pool, cpu_count
-from tqdm import tqdm
-
-import os
-import csv
-
 from tqdm import tqdm
 
 def log_and_parse(
@@ -195,7 +188,7 @@ def convert_all_files(input_directory, output_directory, file_extension, process
         process_function(file_path)
 
 if __name__ == "__main__":
-    input_directory = "./data/municipios"
+    input_directory = "./data/unzipped_files_2025_01"
     output_directory_empresas = "./data/parquet_empresas"
     output_directory_estabelecimentos = "./data/parquet_estabelecimentos"
     output_directory_socios = "./data/parquet_socios"

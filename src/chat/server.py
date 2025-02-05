@@ -3,7 +3,6 @@
 # =============================================================================
 import asyncio
 import logging
-import os
 import gc  # Import para coletor de lixo
 from operator import add
 from typing import List, Annotated

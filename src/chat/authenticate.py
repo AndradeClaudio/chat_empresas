@@ -2,9 +2,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import List, Optional, Tuple, Dict
 import streamlit as st
-import pandas as pd
 import logging
-import os
 
 # Constantes
 DATABASE_FILE = "database.db"
