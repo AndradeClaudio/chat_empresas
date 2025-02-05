@@ -10,7 +10,7 @@ async def main():
     with grpc.insecure_channel("localhost:50051") as channel:
         stub = genai_pb2_grpc.GenAiServiceStub(channel)
         
-        user_question = "Quem são os socios da empresa Strides?"
+        user_question = "Quantas empresas ativa exitem?"
         request = genai_pb2.QuestionRequest(question=user_question)
         # Faz chamada assíncrona ao servidor
         response = stub.AskQuestion(request)

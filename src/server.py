@@ -3,12 +3,13 @@ import asyncio
 import logging
 import os
 import warnings
-from operator import add
 import gc
-from typing import Dict, List, Annotated
+from operator import add
+from typing import List, Annotated
 from typing_extensions import TypedDict
 import io
 import base64
+import concurrent.futures
 
 # Importações de bibliotecas de terceiros
 import numpy as np
@@ -22,8 +23,7 @@ from grpc import aio  # API assíncrona do gRPC
 # Importações do LangChain e LangGraph
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables.graph import MermaidDrawMethod
-from langchain_openai import ChatOpenAI
-from langchain_openai.chat_models import ChatOpenAI
+from langchain_openai.chat_models import ChatOpenAI  # Versão síncrona
 from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -34,7 +34,6 @@ from langgraph.checkpoint.memory import MemorySaver
 # Imports do protocolo gRPC
 import genai_pb2
 import genai_pb2_grpc
-
 
 # =============================================================================
 # Configuração de Logging
@@ -50,14 +49,39 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 load_dotenv()
 
+# =============================================================================
+# Executor global para chamadas bloqueantes
+# =============================================================================
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-# Definir o modelo de linguagem
+# =============================================================================
+# Variáveis globais para cache
+# =============================================================================
+# Cache do esquema do banco (obtido do PDF)
+CACHED_DB_SCHEMA = None
+
+# Conexão global com o DuckDB (pode ser aprimorada para um pool)
+GLOBAL_DUCKDB_CONN = None
+
+def get_duckdb_connection():
+    """Retorna uma conexão com o DuckDB. Se já houver uma conexão aberta, ela é reutilizada."""
+    global GLOBAL_DUCKDB_CONN
+    if GLOBAL_DUCKDB_CONN is None:
+        GLOBAL_DUCKDB_CONN = duckdb.connect('dados_empresas.duckdb')
+    return GLOBAL_DUCKDB_CONN
+
+# =============================================================================
+# Inicialização do modelo de linguagem (síncrono)
+# =============================================================================
 model = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
 
+# =============================================================================
 # Definir o estado do agente usando TypedDict
+# =============================================================================
 class AgentState(TypedDict):
     question: str
     table_schemas: str
+    metadata: str
     database: str
     sql: str
     reflect: Annotated[List[str], add]
@@ -68,41 +92,90 @@ class AgentState(TypedDict):
     interpretation: str
     plot_needed: bool
     plot_html: str
-# Função para extrair metadados do PDF
+
+# =============================================================================
+# Funções de extração e processamento do esquema
+# =============================================================================
 def extract_metadata_from_pdf(pdf_path):
-    metadata = {}
-    pdf_document = pymupdf.open(pdf_path)
-    for page in pdf_document:
-        text = page.get_text()
-        lines = text.split('\n')
-        current_table = None
-        for line in lines:
-            if "Campo" in line and "Descrição" in line:
-                current_table = line.strip()
-                metadata[current_table] = []
-            elif current_table and line.strip():
-                metadata[current_table].append(line.strip())
+    metadata =   """
+    # Novo Layout para os Dados Abertos do CNPJ
+
+## resultados_consulta
+
+- CNPJ_BASICO (VARCHAR) -  Número base de inscrição no CNPJ (oito primeiros dígitos do CNPJ).  \n
+ - RAZAO_SOCIAL (VARCHAR) -  Nome empresarial da pessoa jurídica.        \n
+ - NATUREZA_JURIDICA (VARCHAR) -  Código da natureza jurídica. \n
+ - QUALIFICACAO_RESPONSAVEL (VARCHAR) -  Qualificação da pessoa física responsável pela empresa.\n
+ - CAPITAL_SOCIAL (VARCHAR) - Capital social da empresa. \n
+ - PORTE_EMPRESA (VARCHAR) - Código do porte da empresa: 00 – Não informado, 01 – Microempresa, 03 – EPP, 05 – Demais.\n
+ - ENTE_FEDERATIVO_RESPONSAVEL (VARCHAR) -  Preenchido para órgãos e entidades do grupo de natureza jurídica 1XXX.  \n
+  - CNPJ_ORDEM (VARCHAR) - Número do estabelecimento (9º ao 12º dígito do CNPJ). \n
+ - CNPJ_DV (VARCHAR) - Dígito verificador do CNPJ (dois últimos dígitos).        \n
+ - IDENTIFICADOR_MATRIZ_FILIAL (VARCHAR) - Código: 1 – Matriz, 2 – Filial.     \n
+ - NOME_FANTASIA (VARCHAR) -  Nome fantasia da empresa. \n
+ - SITUACAO_CADASTRAL (VARCHAR) -  Código da situação cadastral: 01 – Nula, 2 – Ativa, 3 – Suspensa, 4 – Inapta, 08 – Baixada.\n
+ - DATA_SITUACAO_CADASTRAL (VARCHAR) - Data do evento da situação cadastral. \n
+ - MOTIVO_SITUACAO_CADASTRAL (VARCHAR) - \n
+ - NOME_CIDADE_EXTERIOR (VARCHAR) - \n
+ - PAIS (VARCHAR) - \n
+ - DATA_INICIO_ATIVIDADE (VARCHAR) - \n
+ - CNAE_FISCAL_PRINCIPAL (VARCHAR) -  Código da atividade econômica principal.  \n
+ - CNAE_FISCAL_SECUNDARIA (VARCHAR) -  Código das atividades econômicas secundárias, separadas por vírgulas.  \n
+ - TIPO_LOGRADOURO (VARCHAR) - \n
+ - LOGRADOURO (VARCHAR) - \n
+ - NUMERO (VARCHAR) - \n
+ - COMPLEMENTO (VARCHAR) - \n
+ - BAIRRO (VARCHAR) - \n
+ - CEP (VARCHAR) - \n
+ - UF (VARCHAR) - \n
+ - MUNICIPIO (VARCHAR) - \n
+ - DDD_1 (VARCHAR) - \n
+ - TELEFONE_1 (VARCHAR) - \n
+ - DDD_2 (VARCHAR) - \n
+ - TELEFONE_2 (VARCHAR) - \n
+ - DDD_FAX (VARCHAR) - \n
+ - FAX (VARCHAR) - \n
+ - CORREIO_ELETRONICO (VARCHAR) - \n
+ - SITUACAO_ESPECIAL (VARCHAR) - \n
+ - DATA_SITUACAO_ESPECIAL (VARCHAR) - \n
+ - CNPJ_BASICO (VARCHAR) - \n
+ - IDENTIFICADOR_SOCIO (VARCHAR) -  Código: 1 – Pessoa Jurídica, 2 – Pessoa Física, 3 – Estrangeiro. \n
+ - NOME_SOCIO (VARCHAR) - \n
+ - CNPJ_CPF_SOCIO (VARCHAR) - \n
+ - QUALIFICACAO_SOCIO (VARCHAR) - \n
+ - DATA_ENTRADA_SOCIEDADE (VARCHAR) - \n
+ - PAIS (VARCHAR) - \n
+ - REPRESENTANTE_LEGAL (VARCHAR) - \n
+ - NOME_REPRESENTANTE (VARCHAR) - \n
+ - QUALIFICACAO_REPRESENTANTE (VARCHAR) - \n
+ - FAIXA_ETARIA (VARCHAR) -  Faixa etária do sócio, de 0 (não se aplica) a 9 (mais de 80 anos).  \n
+---
+
+## Tabelas de Domínio
+
+- **Países**: Código e nome do país.  
+- **Municípios**: Código e nome do município.  
+- **Qualificações de Sócios**: Código e nome da qualificação.  
+- **Naturezas Jurídicas**: Código e descrição da natureza jurídica.  
+- **CNAEs**: Código e nome da atividade econômica.
+    """
+    
     return metadata
 
-
 def get_database_schema(db_path, pdf_path):
+    """Extrai o esquema do banco a partir dos metadados do PDF e cria a view no DuckDB."""
+    global CACHED_DB_SCHEMA
+    if CACHED_DB_SCHEMA is not None:
+        return CACHED_DB_SCHEMA
+
     metadata = extract_metadata_from_pdf(pdf_path)
-    DB_FILE = 'dados_empresas.duckdb'  # Opcional, se preferir persistência em disco
-    conn = duckdb.connect(DB_FILE)  # ou apenas duckdb.connect() para uma conexão em memória
-    # Cria uma tabela resultante a partir do join direto dos arquivos Parquet usando parquet_scan()
+    print(metadata)
+    # Utiliza uma conexão temporária para criação da view
+    conn = duckdb.connect(db_path)
     conn.execute("""
     CREATE OR REPLACE VIEW resultados_consulta AS
     SELECT 
-        e.CNPJ_BASICO, 
-        e.RAZAO_SOCIAL, 
-        e.NATUREZA_JURIDICA, 
-        e.CAPITAL_SOCIAL, 
-        e.PORTE_EMPRESA, 
-        est.NOME_FANTASIA, 
-        est.CNAE_FISCAL_PRINCIPAL, 
-        s.NOME_SOCIO, 
-        s.CNPJ_CPF_SOCIO, 
-        s.QUALIFICACAO_SOCIO
+       e.*, est.*, s.*
     FROM 
         parquet_scan('data/parquet_empresas/*.parquet') AS e
     LEFT JOIN 
@@ -112,92 +185,70 @@ def get_database_schema(db_path, pdf_path):
         parquet_scan('data/parquet_socios/*.parquet') AS s 
         ON e.CNPJ_BASICO = s.CNPJ_BASICO
     """)
-    # Coleta de lixo, se necessário
     gc.collect()
     cursor = conn.cursor()
-    schema = ''
-    cursor.execute(f"DESCRIBE resultados_consulta")
+    schema = "Tabela: resultados_consulta\nColunas:\n"
+    cursor.execute("DESCRIBE resultados_consulta")
     columns = cursor.fetchall()
     schema += f"Tabela: resultados_consulta\n"
     schema += "Colunas:\n"
-    for column in columns:
-        description = next((desc for desc in metadata.get('Campo Descrição', []) if column[0] in desc), '')
-        schema += f" - {column[0]} ({column[1]}) - {description}\n"
-    schema += '\n'
+    #for column in columns:
+    #    description = next((desc for desc in metadata.get('Campo Descrição', []) if column[0] in desc), '')
+    #    schema += f" - {column[0]} ({column[1]}) - {description}\n"
+    #schema += '\n'
+    cursor.close()
     conn.close()
-    return schema
+    CACHED_DB_SCHEMA = schema
+    return schema,metadata
 
-# Definir os nós para o LangGraph
-def search_engineer_node(state: AgentState):
-    db_schema = get_database_schema('dados_empresas.duckdb', '/home/andsil/projetos/chat_empresas/doc/cnpj-metadados (1).pdf')
+# =============================================================================
+# Funções dos nós do LangGraph (versões assíncronas com executor)
+# =============================================================================
+async def search_engineer_node(state: AgentState):
+    # O esquema pode ser calculado de forma síncrona (já que está cacheado)
+    db_schema,metadata = get_database_schema('dados_empresas.duckdb', '/home/andsil/projetos/chat_empresas/doc/cnpj-metadados (1).pdf')
     state['table_schemas'] = db_schema
+    state['metadata'] = metadata
     state['database'] = 'dados_empresas.duckdb'
     return state
 
-def sql_writer_node(state: AgentState):
-    role_prompt = """
-You are an expert in DuckDB and its SQL syntax. Your task is to write **only** the SQL query that answers the user's question. The query should:
-
-- Use the standard DuckDB SQL syntax in English.
-- Use the table and column names as defined in the database schema.
-- Do not include comments, explanations, or any additional text.
-- Do not use code formatting or markdown.
-- Return only a valid SQL query.
-- Always work with `like` and `%` on string fields in the WHERE clause.
-- In all results, include the LEGAL NAME.
-"""
-    instruction = f"Database schema:\n{state['table_schemas']}\n"
-    if len(state['reflect']) > 0:
+async def sql_writer_node(state: AgentState):
+    role_prompt = (
+        "You are an expert in DuckDB and its SQL syntax. Your task is to write **only** the SQL query that answers the user's question. "
+        "The query should:\n"
+        "- Use the standard DuckDB SQL syntax in English.\n"
+        "- Use the table and column names as defined in the database schema.\n"
+        "- Do not include comments, explanations, or any additional text.\n"
+        "- Do not use code formatting or markdown.\n"
+        "- Return only a valid SQL query.\n"
+        "- Always work with `like` and `%` on string fields in the WHERE clause.\n"
+        "- In all results, include the RAZAO_SOCIAL ."
+        "- Nunca usar a coluna NOME_FANTASIA."
+        "- Sempre mantenha a grafia exata das palavras que eu fornecer, sem nenhuma alteração, apenas passe tudo para MAIUSCULA. Se eu escrever 'Vaccinar', responda exatamente com 'VACCINAR' e não altere para 'Vacinar' ou qualquer outra variação."
+    )
+    instruction = f"Database schema:\n{state['table_schemas']}\n  Database Metadata:\n{state['metadata']} "
+    if state['reflect']:
         instruction += f"Consider the following feedback:\n{chr(10).join(state['reflect'])}\n"
-    instruction += f"""Write the SQL query that answers the question below:\n
-                    Convert the question to uppercase. \n
-                    Do not change the spelling of the question. \n
-                    {state['question']}\n"""
+    instruction += (
+        "Write the SQL query that answers the question below:\n"
+        "Convert the question to uppercase.\n"
+        "Do not change the spelling of the question.\n"
+        f"{state['question']}\n"
+    )
     messages = [
         SystemMessage(content=role_prompt),
         HumanMessage(content=instruction)
     ]
-    response = model.invoke(messages)
+    # Encapsula a chamada bloqueante em um executor
+    loop = asyncio.get_running_loop()
+    response = await loop.run_in_executor(executor, model.invoke, messages)
     state['sql'] = response.content.strip()
     state['revision'] += 1
     return state
 
 
-def qa_engineer_node(state: AgentState):
-    role_prompt = """
-You are a QA engineer specialized in the DuckDB relational database and its SQL syntax. Your task is to check whether the provided SQL query correctly answers the user's question.
-"""
-    instruction = f"Based on the following database schema:\n{state['table_schemas']}\n"
-    instruction += f"And the following SQL query:\n{state['sql']}\n"
-    instruction += f"Check if the SQL query can complete the task: {state['question']}\n"
-    instruction += "Respond 'ACCEPTED' if it is correct or 'REJECTED' if it is not.\n"
-    messages = [
-        SystemMessage(content=role_prompt),
-        HumanMessage(content=instruction)
-    ]
-    response = model.invoke(messages)
-    state['accepted'] = 'ACCEPTED' in response.content.upper()
-    return state
-
-
-def chief_dba_node(state: AgentState):
-    role_prompt = """
-You are an experienced DBA, an expert in DuckDB. Your task is to provide detailed feedback to improve the provided SQL query.
-"""
-    instruction = f"Based on the following database schema:\n{state['table_schemas']}\n"
-    instruction += f"And the following SQL query:\n{state['sql']}\n"
-    instruction += f"Please provide useful and detailed recommendations to help improve the SQL query for the task: {state['question']}\n"
-    messages = [
-        SystemMessage(content=role_prompt),
-        HumanMessage(content=instruction)
-    ]
-    response = model.invoke(messages)
-    state['reflect'].append(response.content)
-    return state
-
-
-def execute_query_node(state: AgentState):
-    conn = duckdb.connect(state['database'])
+async def execute_query_node(state: AgentState):
+    conn = get_duckdb_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(state['sql'])
@@ -207,64 +258,51 @@ def execute_query_node(state: AgentState):
         state['error'] = str(e)
     finally:
         cursor.close()
-        conn.close()
     return state
 
-def interpret_results_node(state: AgentState):
-    role_prompt = """
-You are an assistant specialized in interpreting SQL query results with DuckDB syntax, explaining them in natural language.
-Your task is to analyze the query results and provide a clear and concise answer to the original user's question.
-"""
-    instruction = f"Original question: {state['question']}\n"
-    instruction += f"Executed SQL query: {state['sql']}\n"
-    instruction += f"Query results: {state['results']}\n"
-    instruction += "Please interpret these results and answer the original question in natural language."
+async def interpret_results_node(state: AgentState):
+    role_prompt = (
+        "You are an assistant specialized in interpreting SQL query results with DuckDB syntax, "
+        "explaining them in natural language. Your task is to analyze the query results and provide a clear and concise answer to the original user's question."
+    )
+    instruction = (
+        f"Original question: {state['question']}\n"
+        f"Executed SQL query: {state['sql']}\n"
+        f"Query results: {state['results']}\n"
+        "Please interpret these results and answer the original question in natural language."
+    )
     messages = [
         SystemMessage(content=role_prompt),
         HumanMessage(content=instruction)
     ]
-    response = model.invoke(messages)
+    loop = asyncio.get_running_loop()
+    response = await loop.run_in_executor(executor, model.invoke, messages)
     state['interpretation'] = response.content
-    # Decide if a chart is needed based on the interpretation
     return state
 
-# Construir o LangGraph
+# =============================================================================
+# Construir o LangGraph com nós assíncronos
+# =============================================================================
 builder = StateGraph(AgentState)
-
-# Adicionar nós ao grafo
 builder.add_node('search_engineer', search_engineer_node)
 builder.add_node('sql_writer', sql_writer_node)
-builder.add_node('qa_engineer', qa_engineer_node)
-builder.add_node('chief_dba', chief_dba_node)
 builder.add_node('execute_query', execute_query_node)
 builder.add_node('interpret_results', interpret_results_node)
 
-# Definir as arestas entre os nós
 builder.add_edge(START, 'search_engineer')
 builder.add_edge('search_engineer', 'sql_writer')
-builder.add_edge('sql_writer', 'qa_engineer')
-
-# Aresta condicional do qa_engineer
-builder.add_conditional_edges(
-    'qa_engineer',
-    lambda state: 'execute_query' if state['accepted'] or state['revision'] >= state['max_revision'] else 'chief_dba',
-    {'execute_query': 'execute_query', 'chief_dba': 'chief_dba'}
-)
-
-builder.add_edge('chief_dba', 'sql_writer')
+builder.add_edge('sql_writer', 'execute_query')
 builder.add_edge('execute_query', 'interpret_results')
 builder.add_edge('interpret_results', END)
-
-
-# Definir o ponto de entrada
 builder.set_entry_point('search_engineer')
 
-# Compilar o grafo com um checkpointer
 memory = MemorySaver()
 graph = builder.compile(checkpointer=memory)
 
-# Função para processar uma pergunta usando o grafo
-def process_question(question):
+# =============================================================================
+# Função para processar uma pergunta usando o grafo (versão assíncrona)
+# =============================================================================
+async def process_question(question: str) -> AgentState:
     initial_state = {
         'question': question,
         'table_schemas': '',
@@ -280,23 +318,13 @@ def process_question(question):
         'plot_html': ''
     }
     thread = {'configurable': {'thread_id': '1'}}
-    for s in graph.stream(initial_state, thread):
+    async for _ in graph.astream(initial_state, thread):
         pass
-    # Obter o estado final
     final_state = graph.get_state(thread).values
 
-    # Imprimir os resultados
-    print('Consulta SQL Gerada:\n', final_state['sql'])
-    print('\nResultados da Consulta:')
-    if 'results' in final_state:
-        for result in final_state['results']:
-            print(result)
-    else:
-        print('Nenhum resultado')
-    print('\nInterpretação:')
-    print(final_state['interpretation'])
+    # Opcional: Imprimir os resultados no console
     return final_state
-    
+
 # =============================================================================
 # Classe do Servidor gRPC
 # =============================================================================
@@ -304,81 +332,46 @@ class GenAiServiceServicer(genai_pb2_grpc.GenAiServiceServicer):
     """
     Classe que implementa o serviço gRPC para processamento de perguntas via LLMs.
     """
-
     async def AskQuestion(self, request, context):
-        """
-        Método gRPC que recebe a pergunta e retorna a resposta do Agente de forma assíncrona.
-
-        Args:
-            request (genai_pb2.QuestionRequest): Objeto contendo a pergunta do usuário.
-            context (grpc.aio.ServicerContext): Contexto de execução do gRPC.
-
-        Returns:
-            genai_pb2.AnswerResponse: Resposta a ser enviada ao cliente.
-        """
         user_question = request.question
         logger.info("Recebida pergunta via gRPC: %s", user_question)
-
         try:
-            response_text = process_question(user_question)
-            resposta_final = response_text['interpretation']
+            final_state = await process_question(user_question)
+            resposta_final = final_state['interpretation']
         except Exception as e:
             logger.error("Erro ao processar a solicitação: %s", str(e))
             resposta_final = f"Erro ao processar a solicitação: {str(e)}"
-
-        logger.info("Resposta final enviada ao cliente: %.50s",
-                    resposta_final.replace("\n", " ")[:50])
+        logger.info("Resposta final enviada ao cliente: %.50s", resposta_final.replace("\n", " ")[:50])
         return genai_pb2.AnswerResponse(answer=resposta_final)
-
 
 # =============================================================================
 # Função principal de execução do servidor
 # =============================================================================
 async def serve() -> None:
-    """
-    Inicializa e executa o servidor gRPC de forma assíncrona, 
-    lidando com Ctrl+C e interrompendo o loop corretamente.
-    """
     server = aio.server()
-    genai_pb2_grpc.add_GenAiServiceServicer_to_server(
-        GenAiServiceServicer(), server
-    )
-
+    genai_pb2_grpc.add_GenAiServiceServicer_to_server(GenAiServiceServicer(), server)
     listen_addr = "[::]:50051"
     server.add_insecure_port(listen_addr)
-
     logger.info("Servidor configurado para escutar em %s", listen_addr)
-
     try:
-        # Inicia o servidor
         await server.start()
         logger.info("Servidor iniciado com sucesso em %s", listen_addr)
-
-        # Aguarda até que o servidor seja encerrado (p. ex., sinal de interrupção)
         await server.wait_for_termination()
-
     except asyncio.CancelledError:
-        # Captura quando o loop do asyncio foi cancelado (por ex. Ctrl+C)
         logger.info("Serviço gRPC cancelado. Iniciando desligamento...")
-
     except OSError as e:
         logger.error("Falha ao iniciar o servidor: %s", str(e))
         raise
-
     except Exception as e:
         logger.error("Erro inesperado na execução do servidor: %s", str(e))
         raise
-
     finally:
         logger.info("Desligando servidor gRPC...")
         try:
-            # Protege a chamada de shutdown contra cancelamentos
             await asyncio.shield(server.stop(grace=5))
             logger.info("Servidor gRPC desligado com sucesso.")
         except asyncio.CancelledError:
             logger.warning("Shutdown interrompido novamente (Ctrl+C duplo?).")
-            # Não re-levanta para evitar traceback
-
 
 if __name__ == "__main__":
     try:

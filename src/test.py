@@ -13,23 +13,14 @@ conn.execute("PRAGMA memory_limit='8GB';")
 conn.execute("""
 CREATE OR REPLACE VIEW resultados_consulta AS
 SELECT 
-    e.CNPJ_BASICO, 
-    e.RAZAO_SOCIAL, 
-    e.NATUREZA_JURIDICA, 
-    e.CAPITAL_SOCIAL, 
-    e.PORTE_EMPRESA, 
-    est.NOME_FANTASIA, 
-    est.CNAE_FISCAL_PRINCIPAL, 
-    s.NOME_SOCIO, 
-    s.CNPJ_CPF_SOCIO, 
-    s.QUALIFICACAO_SOCIO
+*
 FROM 
-    parquet_scan('data/parquet_empresas/*.parquet') AS e
+    parquet_scan('/home/andsil/projetos/chat_empresas/data/parquet_empresas/*.parquet') AS e
 LEFT JOIN 
-    parquet_scan('data/parquet_estabelecimentos/*.parquet') AS est 
+    parquet_scan('/home/andsil/projetos/chat_empresas/data/parquet_estabelecimentos/*.parquet') AS est 
     ON e.CNPJ_BASICO = est.CNPJ_BASICO
 LEFT JOIN 
-    parquet_scan('data/parquet_socios/*.parquet') AS s 
+    parquet_scan('/home/andsil/projetos/chat_empresas/data/parquet_socios/*.parquet') AS s 
     ON e.CNPJ_BASICO = s.CNPJ_BASICO
 """)
 
@@ -38,7 +29,7 @@ gc.collect()
 
 # Recupera e exibe os resultados da consulta
 print("Recuperando resultados da consulta...")
-result = conn.execute("""SELECT CNPJ_BASICO, RAZAO_SOCIAL, NATUREZA_JURIDICA, CAPITAL_SOCIAL, PORTE_EMPRESA, NOME_FANTASIA, CNAE_FISCAL_PRINCIPAL, NOME_SOCIO, CNPJ_CPF_SOCIO, QUALIFICACAO_SOCIO
+result = conn.execute("""SELECT CNPJ_BASICO, RAZAO_SOCIAL, SITUACAO_CADASTRAL, NATUREZA_JURIDICA, CAPITAL_SOCIAL, PORTE_EMPRESA, NOME_FANTASIA, CNAE_FISCAL_PRINCIPAL, NOME_SOCIO, CNPJ_CPF_SOCIO, QUALIFICACAO_SOCIO
 FROM dados_empresas.main.resultados_consulta
 WHERE UPPER(RAZAO_SOCIAL) LIKE UPPER('%VACCINAR%');""").fetchdf()
 print(result)

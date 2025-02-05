@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package genai;
+
+service GenAiService {
+  rpc AskQuestion (QuestionRequest) returns (AnswerResponse);
+}
+
+message QuestionRequest {
+  string question = 1;
+}
+
+message AnswerResponse {
+  string answer = 1;
+}
