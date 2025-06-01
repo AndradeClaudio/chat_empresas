@@ -1,0 +1,13 @@
+services:
+  pg:
+    image: postgres:16
+    container_name: cnpj_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cnpj
+      POSTGRES_PASSWORD: cnpj
+      POSTGRES_DB: cnpj
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data        # dados persistentes
+    ports:
+      - "5432:5432"
