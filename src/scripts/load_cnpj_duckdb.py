@@ -1,58 +1,58 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-load_cnpj_duckdb.py  –  versão estável
+load_cnpj_duckdb.py – versão robusta p/ DuckDB 1.2+
 
-• Converte CSV Latin-1 → UTF-8 num cache local (1ª execução).
-• Usa COPY … DATEFORMAT '%Y%m%d' NULL '00000000' para importar.
-• Ajusta capital_social (vírgula → DOUBLE).
-• Exporta Parquets (.zstd).
+• Importa todos os CSVs da Receita Federal (qualquer lote/ano) direto
+  para DuckDB, detectando e contornando:
+    - arquivos ZIP esquecidos na pasta,
+    - lotes que vieram em UTF-8,
+    - linhas mal-formadas (aspas duplicadas etc.).
+• Faz fallback automático: tenta Latin-1 e depois UTF-8.
+• capital_social entra como texto e é convertido para DOUBLE
+  após a carga.
+• Exporta as tabelas para Parquet (compressão Zstd).
 
-Requisitos:
-    pip install duckdb==0.10.0 tqdm
+Instalação:
+    pip install duckdb>=1.2 tqdm
 """
 
-import os, re, shutil, tempfile
+from __future__ import annotations
+
+import os
 from pathlib import Path
+from codecs import BOM_UTF8
+
 import duckdb
+from duckdb import InvalidInputException
 from tqdm import tqdm
 
-
-# ─────────── CONFIG ───────────
-RAW_DIR     = Path(r"C:\Users\andrade\projetos\chat_empresas\data\unzipped_files_2023_05")
-UTF8_DIR    = RAW_DIR.parent / "utf8_cache"
+# ───────── CONFIGURAÇÕES ─────────
+RAW_DIR     = Path(r"C:\Users\andrade\projetos\chat_empresas\data\unzipped_files_2025_05")
 DB_PATH     = Path(r"C:\Users\andrade\projetos\chat_empresas\cnpj.duckdb")
 PARQUET_DIR = RAW_DIR.parent / "parquet"
-for d in (UTF8_DIR, PARQUET_DIR): d.mkdir(exist_ok=True, parents=True)
-# ──────────────────────────────
-
-
-def latin1_to_utf8(src: Path) -> Path:
-    """Converte src (Latin-1) em UTF-8 na pasta cache, caso ainda não exista."""
-    dst = UTF8_DIR / src.name
-    if dst.exists():
-        return dst
-    print(f"⬆️  Convertendo → UTF-8: {src.name}")
-    with src.open("rb") as fin, tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
-        for chunk in iter(lambda: fin.read(2 << 20), b""):            # 2 MiB
-            tmp.write(chunk.decode("latin1").encode("utf-8"))
-    shutil.move(tmp.name, dst)
-    return dst
+THREADS     = min(os.cpu_count() or 1, 4)          # ajuste se quiser
+PARQUET_DIR.mkdir(parents=True, exist_ok=True)
+# ─────────────────────────────────
 
 
 def connect_db() -> duckdb.DuckDBPyConnection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(DB_PATH))
-    con.execute(f"PRAGMA threads={os.cpu_count()};")
+    con.execute(f"PRAGMA threads={THREADS};")
     return con
 
 
 def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     ddl = r"""
     CREATE TABLE IF NOT EXISTS empresas (
-      cnpj_basico VARCHAR, razao_social VARCHAR, natureza_juridica VARCHAR,
-      qualificacao_responsavel VARCHAR, capital_social DOUBLE,
-      porte VARCHAR, ente_federativo_responsavel VARCHAR
+      cnpj_basico VARCHAR,
+      razao_social VARCHAR,
+      natureza_juridica VARCHAR,
+      qualificacao_responsavel VARCHAR,
+      capital_social VARCHAR,                -- texto → DOUBLE depois
+      porte VARCHAR,
+      ente_federativo_responsavel VARCHAR
     );
     CREATE TABLE IF NOT EXISTS estabelecimentos (
       cnpj_basico VARCHAR, cnpj_ordem VARCHAR, cnpj_dv VARCHAR,
@@ -87,55 +87,95 @@ def create_schema(con: duckdb.DuckDBPyConnection) -> None:
     CREATE TABLE IF NOT EXISTS qualificacoes (codigo VARCHAR, descricao VARCHAR);
     CREATE TABLE IF NOT EXISTS motivos       (codigo VARCHAR, descricao VARCHAR);
     """
-    for st in ddl.split(";"):
-        s = st.strip()
-        if s:
-            con.execute(s + ";")
+    for stmt in ddl.split(";"):
+        if stmt.strip():
+            con.execute(stmt + ";")
 
 
 def load_files(con: duckdb.DuckDBPyConnection) -> None:
+    """Importa tabelas arquivo-por-arquivo com fallback de encoding."""
     mapping = [
-        (r"EMPRECSV", "empresas", False),
-        (r"ESTABELECSV", "estabelecimentos", True),
-        (r"SOCIOCSV", "socios", True),
-        (r"SIMPLES.*CSV", "simples", True),
-        (r"CNAECSV", "cnaes", False),
-        (r"NATJUCSV", "naturezas", False),
-        (r"MUNICCSV", "municipios", False),
-        (r"PAISCSV", "paises", False),
-        (r"QUALSCSV", "qualificacoes", False),
-        (r"MOTICCSV", "motivos", False),
+        ("*EMPRECSV", "empresas",         False),
+        ("*ESTABELE", "estabelecimentos", True),
+        ("*SOCIOCSV", "socios",           True),
+        ("*SIMPLES*", "simples",          True),
+        ("*CNAECSV",  "cnaes",            False),
+        ("*NATJUCSV", "naturezas",        False),
+        ("*MUNICCSV", "municipios",       False),
+        ("*PAISCSV",  "paises",           False),
+        ("*QUALSCSV", "qualificacoes",    False),
+        ("*MOTICCSV", "motivos",          False),
     ]
 
-    for raw in tqdm(sorted(RAW_DIR.iterdir()), desc="Importando"):
-        fname = raw.name
-        for regex, table, has_dates in mapping:
-            if re.search(regex, fname, re.IGNORECASE):
-                utf8 = latin1_to_utf8(raw)
-                opts = "(DELIMITER ';', QUOTE '\"', HEADER FALSE, DATEFORMAT '%Y%m%d'"
-                if has_dates:
-                    opts += ", NULL '00000000'"
-                opts += ")"
-                con.execute(f"COPY {table} FROM '{utf8.as_posix()}' {opts};")
-                if table == "empresas":
+    for pattern, table, has_null in tqdm(mapping, desc="Importando"):
+        for csv in sorted(RAW_DIR.glob(pattern)):
+            # 1) pula arquivos óbvios não-CSV (ZIP etc.)
+            with open(csv, "rb") as fh:
+                head = fh.read(4)
+            if head.startswith(b"PK\x03\x04"):            # ZIP signature
+                print(f"⚠️  {csv.name} é ZIP → ignorado")
+                continue
+
+            # 2) define ordem de tentativa de encoding
+            if head.startswith(BOM_UTF8):
+                encodings = ("utf-8",)                    # BOM garante UTF-8
+            else:
+                encodings = ("latin-1", "utf-8")
+
+            for enc in encodings:
+                opts = [
+                    "DELIMITER ';'",
+                    "QUOTE '\"'",
+                    "ESCAPE '\"'",            # lida com "" dentro do campo
+                    "HEADER FALSE",
+                    "DATEFORMAT '%Y%m%d'",
+                    f"ENCODING '{enc}'",
+                    "AUTO_DETECT FALSE",
+                    "IGNORE_ERRORS TRUE",     # pula linhas realmente quebradas
+                ]
+                if has_null:
+                    opts.append("NULL '00000000'")
+
+                try:
                     con.execute(
-                        "UPDATE empresas "
-                        "SET capital_social = REPLACE(capital_social, ',', '.')::DOUBLE "
-                        "WHERE capital_social IS NOT NULL;"
+                        f"COPY {table} FROM '{csv.as_posix()}' ({', '.join(opts)});"
                     )
-                break
-        else:
-            print("⚠️  Ignorado:", fname)
+                    break                      # sucesso → sai do loop encodings
+                except InvalidInputException as e:
+                    # Se o erro é “File is not … encoded”, tenta próximo encoding
+                    msg = str(e).lower()
+                    if ("not" in msg) and ("encoded" in msg):
+                        continue
+                    raise                     # outro tipo de erro → propaga
+            else:
+                print(f"⚠️  {csv.name}: não pôde ser importado (encoding).")
+
+    # ---- capital_social: VARCHAR → DOUBLE ----
+    con.execute("""
+        ALTER TABLE empresas
+        ALTER COLUMN capital_social
+        TYPE DOUBLE
+        USING CASE
+                 WHEN capital_social IS NULL OR capital_social = ''
+                 THEN NULL
+                 ELSE
+                   REPLACE(
+                     REPLACE(capital_social, '.', ''), ',', '.')::DOUBLE
+             END;
+    """)
 
 
 def export_parquets(con: duckdb.DuckDBPyConnection) -> None:
-    for tbl in (
+    tables = [
         "empresas", "estabelecimentos", "socios", "simples",
-        "cnaes", "naturezas", "municipios", "paises", "qualificacoes", "motivos"
-    ):
+        "cnaes", "naturezas", "municipios", "paises",
+        "qualificacoes", "motivos",
+    ]
+    for tbl in tables:
+        out_file = PARQUET_DIR / f"{tbl}.parquet"
         con.execute(
             f"COPY (SELECT * FROM {tbl}) "
-            f"TO '{(PARQUET_DIR / (tbl + '.parquet')).as_posix()}' "
+            f"TO '{out_file.as_posix()}' "
             "(FORMAT 'parquet', COMPRESSION 'zstd');"
         )
 
@@ -146,6 +186,7 @@ def main() -> None:
     load_files(con)
     export_parquets(con)
     print(f"\n✅ Banco pronto em {DB_PATH}")
+    print(f"   Parquets salvos em {PARQUET_DIR}")
 
 
 if __name__ == "__main__":
